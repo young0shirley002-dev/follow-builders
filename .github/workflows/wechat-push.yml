@@ -1,0 +1,26 @@
+name: Push to WeChat Work
+
+on:
+  schedule:
+    # 每天北京时间 10:00 (UTC 02:00) 推送
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  push-to-wechat:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: cd scripts && npm install
+
+      - name: Generate and push digest
+        env:
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+        run: cd scripts && node wechat-push.js
