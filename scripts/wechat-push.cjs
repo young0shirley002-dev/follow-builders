@@ -54,7 +54,7 @@ function formatDigest() {
     content += `#### 📱 X/Twitter 热门动态\n\n`;
     let postCount = 0;
 
-    feedX.forEach(builder => {
+    feedX.x.forEach(builder => {
       if (!builder.tweets || !Array.isArray(builder.tweets)) return;
       const author = builder.name || builder.handle || '未知';
 
