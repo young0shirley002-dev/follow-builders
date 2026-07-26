@@ -2,6 +2,11 @@
 /**
  * 企微群推送脚本
  * 读取 follow-builders 的 feed 数据，格式化为企微 Markdown 消息并推送到群
+ *
+ * 数据结构说明：
+ * - feed-x.json: { generatedAt, x: [{ name, handle, bio, tweets: [{id, text, createdAt}] }], stats }
+ * - feed-podcasts.json: { podcasts: [{ source, name, title, url, publishedAt, transcript }], stats }
+ * - feed-blogs.json: { blogs: [...], stats }
  */
 
 const fs = require('fs');
@@ -11,7 +16,6 @@ const path = require('path');
 const WEBHOOK_URL = process.env.WECHAT_WEBHOOK_URL;
 if (!WEBHOOK_URL) {
   console.error('❌ 错误: 未设置 WECHAT_WEBHOOK_URL 环境变量');
-  console.error('请在 GitHub Secrets 中配置 WECHAT_WEBHOOK_URL');
   process.exit(1);
 }
 
@@ -31,7 +35,6 @@ function formatDigest() {
   const feedX = loadFeed('feed-x.json');
   const feedPodcasts = loadFeed('feed-podcasts.json');
   const feedBlogs = loadFeed('feed-blogs.json');
-  const stateFeed = loadFeed('state-feed.json');
 
   // 获取日期
   const today = new Date().toLocaleDateString('zh-CN', {
@@ -44,62 +47,99 @@ function formatDigest() {
   let content = `### 🤖 AI Builders 每日摘要\n`;
   content += `> **${today}**\n\n`;
 
-  // X/Twitter 动态
-  if (feedX && Array.isArray(feedX) && feedX.length > 0) {
+  let hasContent = false;
+
+  // X/Twitter 动态 - 数据在 feedX.x[].tweets[]
+  if (feedX && feedX.x && Array.isArray(feedX.x) && feedX.x.length > 0) {
     content += `#### 📱 X/Twitter 热门动态\n\n`;
-    const topPosts = feedX.slice(0, 8); // 取前8条
-    topPosts.forEach((post, i) => {
-      const author = post.author || post.username || '未知';
-      const text = (post.text || post.content || '').substring(0, 150);
-      const url = post.url || post.link || '';
-      content += `${i + 1}. **${author}**: ${text}${text.length >= 150 ? '...' : ''}\n`;
-      if (url) content += `   🔗 [查看原文](${url})\n`;
+    let postCount = 0;
+
+    feedX.forEach(builder => {
+      if (!builder.tweets || !Array.isArray(builder.tweets)) return;
+      const author = builder.name || builder.handle || '未知';
+
+      builder.tweets.slice(0, 2).forEach(tweet => {
+        if (postCount >= 8) return;
+        const text = (tweet.text || '').substring(0, 150);
+        const tweetUrl = tweet.id ? `https://x.com/${builder.handle}/status/${tweet.id}` : '';
+        postCount++;
+        content += `${postCount}. **${author}**: ${text}${text.length >= 150 ? '...' : ''}\n`;
+        if (tweetUrl) content += `   🔗 [查看原文](${tweetUrl})\n`;
+      });
     });
-    content += `\n`;
+
+    if (postCount > 0) {
+      content += `\n`;
+      hasContent = true;
+    }
   }
 
-  // 播客更新
-  if (feedPodcasts && Array.isArray(feedPodcasts) && feedPodcasts.length > 0) {
+  // 播客更新 - 数据在 feedPodcasts.podcasts[]
+  if (feedPodcasts && feedPodcasts.podcasts && Array.isArray(feedPodcasts.podcasts) && feedPodcasts.podcasts.length > 0) {
     content += `#### 🎙️ 播客更新\n\n`;
-    feedPodcasts.slice(0, 5).forEach((podcast, i) => {
-      const title = podcast.title || podcast.name || '未知标题';
-      const show = podcast.show || podcast.podcast || '';
-      const summary = (podcast.summary || podcast.description || '').substring(0, 120);
-      const url = podcast.url || podcast.link || '';
+
+    feedPodcasts.podcasts.slice(0, 5).forEach((podcast, i) => {
+      const title = podcast.title || '未知标题';
+      const show = podcast.name || '';
+      const summary = (podcast.transcript || '').substring(0, 120).replace(/\n/g, ' ');
+      const url = podcast.url || '';
+
       content += `${i + 1}. **${title}** ${show ? `(${show})` : ''}\n`;
-      content += `   > ${summary}${summary.length >= 120 ? '...' : ''}\n`;
+      if (summary) content += `   > ${summary}${summary.length >= 120 ? '...' : ''}\n`;
       if (url) content += `   🔗 [收听](${url})\n`;
     });
+
     content += `\n`;
+    hasContent = true;
   }
 
-  // 博客文章
-  if (feedBlogs && Array.isArray(feedBlogs) && feedBlogs.length > 0) {
+  // 博客文章 - 数据可能在 feedBlogs.blogs[] 或直接是数组
+  let blogsData = null;
+  if (feedBlogs) {
+    if (Array.isArray(feedBlogs)) {
+      blogsData = feedBlogs;
+    } else if (feedBlogs.blogs && Array.isArray(feedBlogs.blogs)) {
+      blogsData = feedBlogs.blogs;
+    } else if (feedBlogs.articles && Array.isArray(feedBlogs.articles)) {
+      blogsData = feedBlogs.articles;
+    }
+  }
+
+  if (blogsData && blogsData.length > 0) {
     content += `#### 📝 博客精选\n\n`;
-    feedBlogs.slice(0, 5).forEach((blog, i) => {
+
+    blogsData.slice(0, 5).forEach((blog, i) => {
       const title = blog.title || '未知标题';
-      const source = blog.source || blog.blog || '';
-      const summary = (blog.summary || blog.description || blog.excerpt || '').substring(0, 120);
+      const source = blog.source || blog.blog || blog.author || '';
+      const summary = (blog.summary || blog.description || blog.excerpt || blog.content || '').substring(0, 120).replace(/\n/g, ' ');
       const url = blog.url || blog.link || '';
+
       content += `${i + 1}. **${title}** ${source ? `(${source})` : ''}\n`;
-      content += `   > ${summary}${summary.length >= 120 ? '...' : ''}\n`;
+      if (summary) content += `   > ${summary}${summary.length >= 120 ? '...' : ''}\n`;
       if (url) content += `   🔗 [阅读](${url})\n`;
     });
+
     content += `\n`;
+    hasContent = true;
   }
 
   // 统计信息
   const stats = [];
-  if (feedX?.length) stats.push(`X动态 ${feedX.length} 条`);
-  if (feedPodcasts?.length) stats.push(`播客 ${feedPodcasts.length} 期`);
-  if (feedBlogs?.length) stats.push(`博客 ${feedBlogs.length} 篇`);
+  let xTweetCount = 0;
+  if (feedX?.x) {
+    feedX.x.forEach(b => { if (b.tweets) xTweetCount += b.tweets.length; });
+  }
+  if (xTweetCount) stats.push(`X动态 ${xTweetCount} 条`);
+  if (feedPodcasts?.podcasts?.length) stats.push(`播客 ${feedPodcasts.podcasts.length} 期`);
+  if (blogsData?.length) stats.push(`博客 ${blogsData.length} 篇`);
+
   if (stats.length > 0) {
     content += `---\n📊 今日统计: ${stats.join(' | ')}`;
   }
 
-  content += `\n\n> 由 **Follow Builders** 自动生成 | [GitHub](https://github.com/zarazhangrui/follow-builders)`;
+  content += `\n\n> 由 **Follow Builders** 自动生成`;
 
-  return content;
+  return { content, hasContent };
 }
 
 // ========== 推送到企微 ==========
@@ -113,7 +153,7 @@ async function pushToWechat(markdownContent) {
 
   console.log('📤 正在推送到企微群...');
   console.log(`--- 消息预览 ---`);
-  console.log(markdownContent.substring(0, 500) + '...');
+  console.log(markdownContent.substring(0, 600) + '...');
   console.log(`---`);
 
   try {
@@ -141,14 +181,14 @@ async function pushToWechat(markdownContent) {
 async function main() {
   console.log('🚀 开始生成 AI Builders 摘要...\n');
 
-  const digest = formatDigest();
+  const { content, hasContent } = formatDigest();
 
-  if (!digest.includes('####')) {
+  if (!hasContent) {
     console.warn('⚠️  没有找到可推送的内容，跳过');
     process.exit(0);
   }
 
-  await pushToWechat(digest);
+  await pushToWechat(content);
 }
 
 main();
