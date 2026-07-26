@@ -23,4 +23,4 @@ jobs:
       - name: Generate and push digest
         env:
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
-        run: cd scripts && node wechat-push.js
+        run: cd scripts && node wechat-push.cjs
