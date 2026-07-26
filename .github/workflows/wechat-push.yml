@@ -5,6 +5,21 @@ on:
     # 每天北京时间 10:00 (UTC 02:00) 推送
     - cron: '0 2 * * *'
   workflow_dispatch:
+    # 手动触发时也可以传入选项
+    inputs:
+      debug:
+        description: '调试模式（输出更多信息）'
+        required: false
+        default: 'false'
+        type: boolean
+      language:
+        description: '语言: zh | en'
+        required: false
+        default: 'zh'
+        type: choice
+        options:
+          - zh
+          - en
 
 jobs:
   push-to-wechat:
@@ -23,4 +38,19 @@ jobs:
       - name: Generate and push digest
         env:
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+          # ========== 下面是自定义配置 ==========
+          # 语言: zh=中文, en=英文
+          PUSH_LANGUAGE: ${{ github.event.inputs.language || secrets.PUSH_LANGUAGE || 'zh' }}
+          # 启用的板块: x,podcasts,blogs（逗号分隔，去掉不想要的）
+          PUSH_SECTIONS: ${{ secrets.PUSH_SECTIONS || 'x,podcasts,blogs' }}
+          # 各板块最大条数
+          MAX_X_TWEETS: ${{ secrets.MAX_X_TWEETS || '6' }}
+          MAX_PODCASTS: ${{ secrets.MAX_PODCASTS || '4' }}
+          MAX_BLOGS: ${{ secrets.MAX_BLOGS || '4' }}
+          # 关键词过滤（可选）：只推送包含这些关键词的内容
+          KEYWORDS_INCLUDE: ${{ secrets.KEYWORDS_INCLUDE }}
+          # 关键词排除（可选）：排除包含这些关键词的内容
+          KEYWORDS_EXCLUDE: ${{ secrets.KEYWORDS_EXCLUDE }}
+          # 是否显示统计信息
+          SHOW_STATS: ${{ secrets.SHOW_STATS || 'true' }}
         run: cd scripts && node wechat-push.cjs
